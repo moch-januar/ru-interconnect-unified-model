@@ -1,5 +1,5 @@
 # Manuscript Figure Generation - Source Code Mapping
-**Manuscript**: Manuscript1_Transport_ACS.tex  
+**Manuscript**: Manuscript_JMCC.tex  
 **Generated**: April 11, 2026
 
 ---
