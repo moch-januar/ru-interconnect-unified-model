@@ -1,0 +1,32 @@
+Sanity report (Ru size-effect fits)
+Dataset: /home/januar/EcoSystem/DesktopSoftwares/JanInterconnect/Papers.VLSI2026/Manuscript1_Transport/MatlabCode/data/Ru-interconnect_rho_vs_thickness_fitted.csv
+Assumed reference temperature: 300 K
+Fixed TCR alpha_TCR: 0.0045 1/K
+
+FS fit (rho = rho0*F_FS, film assumption: width ~ 1 um):
+  rho0_300  = 9.033 uOhm*cm
+  lambda0   = 19.35 nm
+  p         = 0.627
+  t_dead    = 0.000 nm
+  RMSE      = 0.172 uOhm*cm
+
+MS-only fit (note: thickness-independent; expected to fail):
+  rho0_300  = 7.297 uOhm*cm
+  lambda0   = 11.35 nm
+  R         = 0.469
+  D         = 22.53 nm
+  RMSE      = 2.287 uOhm*cm
+
+Combined fit (rho = rho0*F_FS*F_MS; independent-scatter approximation):
+  rho0_300  = 5.552 uOhm*cm
+  lambda0   = 18.01 nm
+  p         = 0.599
+  t_dead    = 0.000 nm
+  R         = 0.119
+  D         = 5.43 nm
+  RMSE      = 0.172 uOhm*cm
+
+Model comparison:
+  FS:        AIC=-516.72  BIC=-514.46
+  MS-only:    AIC=-449.43  BIC=-447.17
+  FSxMS:      AIC=-512.72  BIC=-509.33

@@ -1,0 +1,15 @@
+TeX drop-in checklist (2-subplot-per-box compliance)
+Output folder: /home/januar/EcoSystem/DesktopSoftwares/JanInterconnect/Papers.VLSI2026/Manuscript1_Transport/MatlabCode/Figs
+
+BOX_01: axes=2 (MUST be 2)
+  PDF: Fig_BOX_01.pdf
+  PNG: Fig_BOX_01.png
+BOX_02: axes=2 (MUST be 2)
+  PDF: Fig_BOX_02.pdf
+  PNG: Fig_BOX_02.png
+BOX_03: axes=2 (MUST be 2)
+  PDF: Fig_BOX_03.pdf
+  PNG: Fig_BOX_03.png
+BOX_04: axes=2 (MUST be 2)
+  PDF: Fig_BOX_04.pdf
+  PNG: Fig_BOX_04.png

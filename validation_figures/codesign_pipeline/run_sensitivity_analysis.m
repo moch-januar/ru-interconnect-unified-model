@@ -1,0 +1,203 @@
+%% 
+function fig_sensitivity = run_sensitivity_analysis(out_dir, varargin)
+%RUN_SENSITIVITY_ANALYSIS Monte Carlo uncertainty propagation (Step 1).
+%   fig = run_sensitivity_analysis(out_dir)
+%
+%   Propagates ±1-sigma uncertainty in (p, R, t_dead, D) through the full
+%   self-consistent thermal-EM-RC loop.  Produces:
+%     Fig_BOX_26.png — (a) MTF distributions, (b) sensitivity bar chart
+%     Fig_BOX_27.png — (a) DT vs Rline scatter + CI, (b) parameter tornado
+%
+%   This analysis is unique to a coupled framework: it shows how transport
+%   uncertainty amplifies nonlinearly through the rho-T-MTF feedback loop.
+
+p = inputParser;
+p.addParameter('N_MC', 800, @isscalar);
+p.addParameter('rng_seed', 42, @isscalar);
+p.addParameter('export_dpi', 600, @isscalar);
+p.parse(varargin{:});
+N  = p.Results.N_MC;
+rng(p.Results.rng_seed);
+dpi = p.Results.export_dpi;
+
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+
+metals = codesign_params();
+ruIdx  = [1 2 3];  % Conv, Sput, Text
+
+% Operating point
+w0 = 10e-9; t0 = 10e-9; L0 = 1e-6;
+J0 = 10e14;  % 10 MA/cm^2 = 10e10 A/m^2 ... wait, 10 MA/cm^2 = 10e6 * 1e4 = 1e11? No.
+% 1 MA/cm^2 = 1e6 A / (1e-2 m)^2 = 1e6 / 1e-4 = 1e10 A/m^2
+% 10 MA/cm^2 = 1e11 A/m^2
+J0 = 1e11;
+
+% Relative uncertainty (1-sigma) for each parameter
+sigma_frac = 0.15;  % 15% relative uncertainty
+
+% Parameter names to perturb
+param_names = {'p', 'R', 't_dead', 'D'};
+nParams = numel(param_names);
+
+% Storage for all three Ru conditions
+results = struct();
+
+for ri = 1:numel(ruIdx)
+    met = metals(ruIdx(ri));
+
+    % Nominal evaluation
+    [Rnom, MTFnom, taunom, ~, ~] = compute_metrics(met, w0, t0, L0, J0);
+    [~, ~, DTnom] = solve_electrothermal(met, w0, t0, L0, J0);
+
+    % Monte Carlo: perturb each parameter independently and jointly
+    MTF_mc  = zeros(N, 1);
+    R_mc    = zeros(N, 1);
+    DT_mc   = zeros(N, 1);
+    tau_mc  = zeros(N, 1);
+    pvals   = zeros(N, nParams);
+
+    for k = 1:N
+        met_k = met;
+        for ip = 1:nParams
+            pn = param_names{ip};
+            nominal = met.(pn);
+            perturbed = nominal * (1 + sigma_frac * randn());
+            % Enforce physical bounds
+            switch pn
+                case 'p'
+                    perturbed = max(0.001, min(0.99, perturbed));
+                case 'R'
+                    perturbed = max(0.01, min(0.69, perturbed));
+                case 't_dead'
+                    perturbed = max(0, min(3e-9, perturbed));
+                case 'D'
+                    perturbed = max(3e-9, min(100e-9, perturbed));
+            end
+            met_k.(pn) = perturbed;
+            pvals(k, ip) = perturbed;
+        end
+        [R_mc(k), MTF_mc(k), tau_mc(k)] = compute_metrics(met_k, w0, t0, L0, J0);
+        [~, ~, DT_mc(k)] = solve_electrothermal(met_k, w0, t0, L0, J0);
+    end
+
+    results(ri).name    = met.label;
+    results(ri).color   = met.color;
+    results(ri).MTF_mc  = MTF_mc;
+    results(ri).R_mc    = R_mc;
+    results(ri).DT_mc   = DT_mc;
+    results(ri).tau_mc  = tau_mc;
+    results(ri).MTFnom  = MTFnom;
+    results(ri).Rnom    = Rnom;
+    results(ri).DTnom   = DTnom;
+    results(ri).pvals   = pvals;
+
+    % One-at-a-time sensitivity indices: (d log MTF) / (d log p_i)
+    sens = zeros(nParams, 1);
+    for ip = 1:nParams
+        pn = param_names{ip};
+        met_up = met;
+        met_dn = met;
+        delta = 0.05;  % 5% perturbation for finite difference
+        met_up.(pn) = met.(pn) * (1 + delta);
+        met_dn.(pn) = met.(pn) * (1 - delta);
+        [~, mtf_up] = compute_metrics(met_up, w0, t0, L0, J0);
+        [~, mtf_dn] = compute_metrics(met_dn, w0, t0, L0, J0);
+        sens(ip) = (log10(mtf_up) - log10(mtf_dn)) / (2 * delta);
+    end
+    results(ri).sens = sens;
+end
+
+% =====================================================================
+%  Figure 1: MTF distributions + sensitivity bar chart
+% =====================================================================
+fig1 = figure('Units', 'centimeters', 'Position', [2 2 18 8], ...
+    'Color', 'w', 'PaperPositionMode', 'auto');
+tl = tiledlayout(1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+% (a) MTF histograms (converted to years for consistency with Fig_BOX_23)
+hrs_per_yr = 365.25 * 24;
+nexttile;
+hold on;
+edges = linspace(-4, 4, 50);  % log10(years)
+for ri = 1:3
+    MTF_yr = results(ri).MTF_mc / hrs_per_yr;
+    logMTF = log10(max(MTF_yr, 1e-10));
+    histogram(logMTF, edges, 'FaceColor', results(ri).color, ...
+        'FaceAlpha', 0.45, 'EdgeColor', 'none', 'DisplayName', results(ri).name);
+    xline(log10(max(results(ri).MTFnom / hrs_per_yr, 1e-10)), '--', 'Color', results(ri).color, ...
+        'LineWidth', 1.5, 'HandleVisibility', 'off');
+end
+xline(log10(10), 'k-', 'LineWidth', 2, 'HandleVisibility', 'off');  % 10-year line
+% text(log10(10)+0.05, 0.92, '10 yr', 'Units', 'normalized', ...
+%     'FontSize', 8, 'FontWeight', 'bold', 'HorizontalAlignment', 'left', ...
+%     'VerticalAlignment', 'top');
+xlabel('log_{10}(MTF [years])', 'FontWeight', 'bold');
+ylabel('Count', 'FontWeight', 'bold');
+title('(a) MTF Distribution (MC)', 'FontSize', 10);
+legend('Location', 'northwest', 'FontSize', 7);
+grid on; box on;
+xlim([-4.5, 1.5])
+
+% (b) Sensitivity bar chart (tornado-style, grouped)
+nexttile;
+nR = numel(ruIdx);
+X = 1:nParams;
+barData = zeros(nParams, nR);
+for ri = 1:nR
+    barData(:, ri) = abs(results(ri).sens);
+end
+b = bar(X, barData, 'grouped');
+for ri = 1:nR
+    b(ri).FaceColor = results(ri).color;
+end
+set(gca, 'XTick', X, 'XTickLabel', {'p', 'R', 't_{dead}', 'D'});
+ylabel('|d log_{10}(MTF) / d log(param)|', 'FontWeight', 'bold');
+title('(b) Sensitivity Index', 'FontSize', 10);
+legend({results.name}, 'Location', 'northeast', 'FontSize', 7);
+grid on; box on;
+
+polish_figure(fig1);
+exportgraphics(fig1, fullfile(out_dir, 'Fig_BOX_26.png'), 'Resolution', dpi);
+fprintf('  Saved: %s\n', fullfile(out_dir, 'Fig_BOX_26.png'));
+
+% =====================================================================
+%  Figure 2: DT vs Rline scatter + tau_RC uncertainty
+% =====================================================================
+fig2 = figure('Units', 'centimeters', 'Position', [2 2 18 8], ...
+    'Color', 'w', 'PaperPositionMode', 'auto');
+tiledlayout(1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+% (a) Delta-T vs R_line scatter
+nexttile;
+hold on;
+for ri = 1:3
+    scatter(results(ri).R_mc, results(ri).DT_mc, 8, results(ri).color, ...
+        'filled', 'MarkerFaceAlpha', 0.3, 'DisplayName', results(ri).name);
+    % Nominal point
+    plot(results(ri).Rnom, results(ri).DTnom, 'p', 'MarkerSize', 12, ...
+        'MarkerFaceColor', results(ri).color, 'MarkerEdgeColor', 'k', ...
+        'LineWidth', 1.2, 'HandleVisibility', 'off');
+end
+xlabel('R_{line} (\Omega/\mum)', 'FontWeight', 'bold');
+ylabel('\DeltaT (K)', 'FontWeight', 'bold');
+title('(c) \DeltaT vs. R_{line} (MC)', 'FontSize', 10);
+legend('Location', 'northwest', 'FontSize', 7);
+grid on; box on;
+
+% (b) RC delay uncertainty box plot
+nexttile;
+tau_all = [results(1).tau_mc; results(2).tau_mc; results(3).tau_mc] * 1e12;
+grp = [ones(N,1); 2*ones(N,1); 3*ones(N,1)];
+boxplot(tau_all, grp, 'Labels', {results(1).name, results(2).name, results(3).name}, ...
+    'Colors', [results(1).color; results(2).color; results(3).color], ...
+    'Widths', 0.5);
+ylabel('\tau_{RC} (ps)', 'FontWeight', 'bold');
+title('(d) RC Delay Uncertainty', 'FontSize', 10);
+grid on; box on;
+
+polish_figure(fig2);
+exportgraphics(fig2, fullfile(out_dir, 'Fig_BOX_27.png'), 'Resolution', dpi);
+fprintf('  Saved: %s\n', fullfile(out_dir, 'Fig_BOX_27.png'));
+
+fig_sensitivity = struct('fig1', fig1, 'fig2', fig2);
+end
